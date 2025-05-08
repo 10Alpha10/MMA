@@ -1,196 +1,101 @@
-'use client'
+import { connectToDatabase } from "@/lib/mongodb"; // Import the database connection function
+import User from "@/models/user.model"; // Import the user model
+import { NextResponse } from "next/server"; // Import NextResponse for the response
+import bcrypt from "bcryptjs"; // Import bcryptjs
 
-import React, { useState } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Loader2 } from 'lucide-react'
+export async function POST(req: Request) {
+  try {
+    // Log the request body
+    console.log('Request body:', await req.json());  // أضف هذا السطر لتسجيل البيانات المرسلة
 
-const SignupPage = () => {
-  const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    confirmPassword: '',
-  })
+    // Check if the request contains data
+    const { email, password, confirmPassword } = await req.json();
 
-  const [errors, setErrors] = useState<Record<string, string>>({})
-  const [serverError, setServerError] = useState('')
-  const [isLoading, setIsLoading] = useState(false)
-  const router = useRouter()
-
-  // Validate the form fields
-  const validateForm = () => {
-    const newErrors: Record<string, string> = {}
-    let isValid = true
-
-    if (!formData.email.trim()) {
-      newErrors.email = 'Email is required'
-      isValid = false
-    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email'
-      isValid = false
+    // Check if the fields are provided
+    if (!email || !password || !confirmPassword) {
+      console.error('Missing required fields'); // سجل خطأ إذا كانت الحقول مفقودة
+      return NextResponse.json(
+        { message: "All fields are required" },
+        { status: 400 }
+      );
     }
 
-    if (!formData.password) {
-      newErrors.password = 'Password is required'
-      isValid = false
-    } else if (formData.password.length < 8) {
-      newErrors.password = 'Password must be at least 8 characters'
-      isValid = false
+    // Validate the email using a regular expression
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      console.error('Invalid email format:', email); // سجل الخطأ إذا كان البريد الإلكتروني غير صحيح
+      return NextResponse.json(
+        { message: "Invalid email address" },
+        { status: 400 }
+      );
     }
 
-    if (formData.password !== formData.confirmPassword) {
-      newErrors.confirmPassword = 'Passwords do not match'
-      isValid = false
+    // Validate the password strength: it must contain lowercase, uppercase letters, and numbers
+    const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
+    if (!passwordRegex.test(password)) {
+      console.error('Password does not meet requirements:', password); // سجل الخطأ إذا كانت كلمة المرور لا تستوفي المتطلبات
+      return NextResponse.json(
+        { message: "Password must contain at least one uppercase letter, one lowercase letter, and one digit" },
+        { status: 400 }
+      );
     }
 
-    setErrors(newErrors)
-    return isValid
+    // Validate the password length
+    if (password.length < 8) {
+      console.error('Password is too short:', password); // سجل الخطأ إذا كانت كلمة المرور قصيرة جدًا
+      return NextResponse.json(
+        { message: "Password must be at least 8 characters long" },
+        { status: 400 }
+      );
+    }
+
+    // Check if the passwords match
+    if (password !== confirmPassword) {
+      console.error('Passwords do not match'); // سجل الخطأ إذا كانت كلمات المرور لا تتطابق
+      return NextResponse.json(
+        { message: "Passwords do not match" },
+        { status: 400 }
+      );
+    }
+
+    await connectToDatabase();
+
+    // Check if the user already exists
+    const existingUser = await User.findOne({ email });
+    if (existingUser) {
+      console.error('User already exists:', email); // سجل الخطأ إذا كان المستخدم موجودًا بالفعل
+      return NextResponse.json(
+        { message: "This email is already registered" },
+        { status: 400 }
+      );
+    }
+
+    // Hash the password
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    // Create the user
+    const newUser = await User.create({
+      email,
+      password: hashedPassword,
+    });
+
+    // Log the newly created user (without password)
+    console.log('User created successfully:', newUser);
+
+    // Return the success response with user details (without password)
+    return NextResponse.json(
+      {
+        message: "Account created successfully",
+        user: { id: newUser._id, email: newUser.email },
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    // Log the error
+    console.error('Signup error:', error); // سجل تفاصيل الخطأ في حالة حدوث استثناء
+    return NextResponse.json(
+      { message: "Server error occurred" },
+      { status: 500 }
+    );
   }
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!validateForm()) return
-
-    setIsLoading(true)
-    setServerError('')
-
-    try {
-      const response = await fetch('/api/signup', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: formData.email,
-          password: formData.password,
-          confirmPassword: formData.confirmPassword,  // تأكد من إرسال confirmPassword
-        }),
-      })
-
-      const contentType = response.headers.get('content-type')
-      if (!contentType || !contentType.includes('application/json')) {
-        const text = await response.text()
-        throw new Error(text || 'Invalid response from server')
-      }
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.message || 'Signup failed')
-      }
-
-      router.push('/login')
-    } catch (error) {
-      setServerError(error instanceof Error ? error.message : 'Signup failed')
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const { name, value } = e.target
-    setFormData((prev) => ({ ...prev, [name]: value }))
-  }
-
-  return (
-    <div className="flex flex-col items-center justify-center min-h-screen bg-gradient-to-b from-secondary to-background dark:from-slate-900 dark:to-slate-800 p-4">
-      <div className="w-full max-w-md bg-white dark:bg-slate-950 rounded-lg shadow-lg overflow-hidden">
-        <div className="bg-primary dark:bg-blue-700 p-6">
-          <h1 className="text-white text-center text-2xl font-bold">Create an Account</h1>
-          <p className="text-blue-100 text-center mt-2">Sign up for a new account</p>
-        </div>
-
-        <div className="p-6">
-          {serverError && (
-            <p className="text-red-600 text-sm text-center mb-4">{serverError}</p>
-          )}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Email field */}
-            <div className="space-y-2">
-              <Label htmlFor="email">Email Address</Label>
-              <Input
-                id="email"
-                name="email"
-                type="email"
-                placeholder="you@example.com"
-                value={formData.email}
-                onChange={handleChange}
-                autoComplete="email"
-                className={errors.email ? 'border-red-500' : ''}
-              />
-              {errors.email && <p className="text-red-500 text-xs">{errors.email}</p>}
-            </div>
-
-            {/* Password field */}
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
-              <Input
-                id="password"
-                name="password"
-                type="password"
-                placeholder="At least 8 characters"
-                value={formData.password}
-                onChange={handleChange}
-                autoComplete="new-password"
-                className={errors.password ? 'border-red-500' : ''}
-              />
-              {errors.password && <p className="text-red-500 text-xs">{errors.password}</p>}
-            </div>
-
-            {/* Confirm password field */}
-            <div className="space-y-2">
-              <Label htmlFor="confirmPassword">Confirm Password</Label>
-              <Input
-                id="confirmPassword"
-                name="confirmPassword"
-                type="password"
-                placeholder="Confirm your password"
-                value={formData.confirmPassword}
-                onChange={handleChange}
-                autoComplete="new-password"
-                className={errors.confirmPassword ? 'border-red-500' : ''}
-              />
-              {errors.confirmPassword && (
-                <p className="text-red-500 text-xs">{errors.confirmPassword}</p>
-              )}
-            </div>
-
-            {/* Submit button */}
-            <Button
-              type="submit"
-              className="w-full bg-primary hover:bg-primary/90 text-primary-foreground transition-all duration-200"
-              disabled={isLoading}
-            >
-              {isLoading ? (
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Creating account...
-                </div>
-              ) : (
-                'Sign up'
-              )}
-            </Button>
-
-            {/* Link to login */}
-            <div className="text-center mt-4">
-              <p className="text-sm text-gray-600 dark:text-gray-400">
-                Already have an account?{' '}
-                <Link
-                  href="/login"
-                  className="text-primary hover:text-primary/80 dark:text-blue-400 dark:hover:text-blue-300 font-medium"
-                >
-                  Sign in
-                </Link>
-              </p>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
-  )
 }
-
-export default SignupPage
