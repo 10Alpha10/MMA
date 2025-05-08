@@ -1,14 +1,12 @@
-import { connectToDatabase } from "@/lib/mongodb"; // Import the database connection function
-import User from "@/models/user.model"; // Import the user model
-import { NextResponse } from "next/server"; // Import NextResponse for the response
-import bcrypt from "bcryptjs"; // Import bcryptjs
+import { connectToDatabase } from "@/lib/mongodb"; 
+import User from "@/models/user.model"; 
+import { NextResponse } from "next/server"; 
+import bcrypt from "bcryptjs"; 
 
 export async function POST(req: Request) {
   try {
-    // Check if the request contains data
     const { email, password, confirmPassword } = await req.json();
 
-    // Check if the fields are provided
     if (!email || !password || !confirmPassword) {
       return NextResponse.json(
         { message: "All fields are required" },
@@ -16,7 +14,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Validate the email using a regular expression
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     if (!emailRegex.test(email)) {
       return NextResponse.json(
@@ -25,7 +22,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Validate the password strength: it must contain lowercase, uppercase letters, and numbers
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}$/;
     if (!passwordRegex.test(password)) {
       return NextResponse.json(
@@ -34,7 +30,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Validate the password length
     if (password.length < 8) {
       return NextResponse.json(
         { message: "Password must be at least 8 characters long" },
@@ -42,7 +37,6 @@ export async function POST(req: Request) {
       );
     }
 
-    // Check if the passwords match
     if (password !== confirmPassword) {
       return NextResponse.json(
         { message: "Passwords do not match" },
@@ -52,7 +46,6 @@ export async function POST(req: Request) {
 
     await connectToDatabase();
 
-    // Check if the user already exists
     const existingUser = await User.findOne({ email });
     if (existingUser) {
       return NextResponse.json(
@@ -61,25 +54,21 @@ export async function POST(req: Request) {
       );
     }
 
-    // Hash the password
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    // Create the user
     const newUser = await User.create({
       email,
       password: hashedPassword,
     });
 
-    // Return the success response with user details (without password)
     return NextResponse.json(
       {
         message: "Account created successfully",
         user: { id: newUser._id, email: newUser.email },
       },
-      { status: 201 }
+      { status: 201, headers: { "Access-Control-Allow-Origin": "*" } }
     );
   } catch (error) {
-    // Handle errors
     console.error("Signup error:", error);
     return NextResponse.json(
       { message: "Server error occurred" },

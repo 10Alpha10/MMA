@@ -1,74 +1,91 @@
 import { connectToDatabase } from "@/lib/mongodb";
 import User from "@/models/user.model";
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import jwt from "jsonwebtoken"; // ← Make sure it's installed
+import jwt from "jsonwebtoken";
+import { corsHeaders, handleOptions } from "@/lib/cors";
 
-export async function POST(req: Request) {
+// ✅ لدعم preflight request
+export async function OPTIONS(req: NextRequest) {
+  return handleOptions(req);
+}
+
+export async function POST(req: NextRequest) {
   try {
     const { email, password } = await req.json();
 
-    // Check if email and password are provided
     if (!email || !password) {
-      return NextResponse.json(
-        { message: "Email and password are required" },
-        { status: 400 }
+      return new NextResponse(
+        JSON.stringify({ message: "Email and password are required" }),
+        {
+          status: 400,
+          headers: {
+            "Content-Type": "application/json",
+            ...corsHeaders(req),
+          },
+        }
       );
     }
 
-    // Connect to the database and find the user
     await connectToDatabase();
     const user = await User.findOne({ email });
 
-    // Check if user exists
     if (!user) {
-      return NextResponse.json(
-        { message: "Invalid email" },
-        { status: 401 }
+      return new NextResponse(
+        JSON.stringify({ message: "Invalid email" }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json", ...corsHeaders(req) },
+        }
       );
     }
 
-    // Verify the password
     const isPasswordCorrect = await bcrypt.compare(password, user.password);
     if (!isPasswordCorrect) {
-      return NextResponse.json(
-        { message: "Invalid password  " },
-        { status: 401 }
+      return new NextResponse(
+        JSON.stringify({ message: "Invalid password" }),
+        {
+          status: 401,
+          headers: { "Content-Type": "application/json", ...corsHeaders(req) },
+        }
       );
     }
 
-    // Remove password from the user object
     const { password: _, ...userWithoutPassword } = user.toObject();
 
-    // ⬇️ Generate JWT token
     const token = jwt.sign(
       { userId: user._id, email: user.email },
-      process.env.JWT_SECRET!, // ← Make sure this exists in .env file
+      process.env.JWT_SECRET!,
       { expiresIn: "7d" }
     );
 
-    // ⬇️ Create response and set token in cookies
-    const response = NextResponse.json({
-      message: "Login successful",
-      user: userWithoutPassword,
-    });
+    const response = NextResponse.json(
+      {
+        message: "Login successful",
+        user: userWithoutPassword,
+      },
+      {
+        headers: { ...corsHeaders(req) },
+      }
+    );
 
     response.cookies.set("auth-token", token, {
-      httpOnly: true, // Cookie not accessible from JavaScript
-      secure: process.env.NODE_ENV === "production", // Secure only in production
-      maxAge: 60 * 60 * 24 * 7, // Token valid for 7 days
-      path: "/", // Cookie path
-      sameSite: "strict", // Prevent cross-site sending
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 60 * 60 * 24 * 7,
+      path: "/",
+      sameSite: "strict",
     });
 
     return response;
-
   } catch (error) {
-    // Handle server errors
     console.error("Login error:", error);
-    return NextResponse.json(
-      { message: "Server error occurred" },
-      { status: 500 }
+    return new NextResponse(
+      JSON.stringify({ message: "Server error occurred" }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
     );
   }
 }
